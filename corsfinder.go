@@ -265,25 +265,6 @@ func makeHttpClient(cfg ScanConfig) *http.Client {
 }
 
 // ---------------------------
-// URL normalization & fallback
-// ---------------------------
-
-func normalizeDomainToTargets(domain string, cfg ScanConfig) []string {
-	out := []string{}
-	domain = strings.TrimSpace(domain)
-	domain = strings.TrimPrefix(domain, "https://")
-	domain = strings.TrimPrefix(domain, "http://")
-	domain = strings.TrimSuffix(domain, "/")
-	if !cfg.OnlyHttps {
-		out = append(out, "https://"+domain)
-		out = append(out, "http://"+domain)
-	} else {
-		out = append(out, "https://"+domain)
-	}
-	return out
-}
-
-// ---------------------------
 // Vulnerability detection logic
 // ---------------------------
 
@@ -443,11 +424,30 @@ func worker(id int, cfg ScanConfig, jobs <-chan Job, results chan<- Result, wg *
 				cookieUsed = true
 			}
 
-			// prepare base candidates
-			candidates := []string{"https://" + job.Domain}
-			if !perCfg.OnlyHttps {
-				candidates = append(candidates, "http://"+job.Domain)
+			// === START FIX FOR SCHEME HANDLING ===
+			candidates := []string{}
+			domain := strings.TrimSuffix(job.Domain, "/")
+			
+			// Check if a scheme is already present in the input domain
+			hasScheme := strings.HasPrefix(domain, "http://") || strings.HasPrefix(domain, "https://")
+
+			if hasScheme {
+				// Scheme is present, use it as is
+				candidates = append(candidates, domain)
+
+				// If https was provided and OnlyHttps is false, add http as fallback
+				if !perCfg.OnlyHttps && strings.HasPrefix(domain, "https://") {
+					httpFallback := strings.Replace(domain, "https://", "http://", 1)
+					candidates = append(candidates, httpFallback)
+				}
+			} else {
+				// No scheme is present, prepend both https and http (if not OnlyHttps)
+				candidates = append(candidates, "https://"+domain)
+				if !perCfg.OnlyHttps {
+					candidates = append(candidates, "http://"+domain)
+				}
 			}
+			// === END FIX FOR SCHEME HANDLING ===
 
 			chosenBase := ""
 			var getRes Result
@@ -858,4 +858,3 @@ func main() {
 	// wait for output goroutine to finish
 	<-done
 }
-
